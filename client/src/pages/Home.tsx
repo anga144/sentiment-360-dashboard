@@ -1,25 +1,69 @@
-import { Button } from "@/components/ui/button";
-import { Loader2 } from "lucide-react";
-import { Streamdown } from 'streamdown';
+import { useMemo, useState } from "react";
+import { AlertTriangle, ArrowRight, BarChart3, Check, ChevronDown, CircleHelp, Download, FileText, Fingerprint, Lightbulb, LockKeyhole, Menu, MessageSquarePlus, Plus, Search, ShieldCheck, Sparkles, Upload, X } from "lucide-react";
 
-/**
- * All content in this page are only for example, replace with your own feature implementation
- * When building pages, remember your instructions in Frontend Best Practices, Design Guide and Common Pitfalls
- */
-export default function Home() {
-  // If theme is switchable in App.tsx, we can implement theme toggling like this:
-  // const { theme, toggleTheme } = useTheme();
+type Complaint = { id: number; text: string; department: string; sentiment: "positive" | "negative" | "neutral"; score: number; urgency: "critical" | "standard"; confidence: number; signal?: string; };
 
-  return (
-    <div className="min-h-screen flex flex-col">
-      <main>
-        {/* Example: lucide-react for icons */}
-        <Loader2 className="animate-spin" />
-        Example Page
-        {/* Example: Streamdown for markdown rendering */}
-        <Streamdown>Any **markdown** content</Streamdown>
-        <Button variant="default">Example Button</Button>
-      </main>
-    </div>
-  );
+const bankSample = `URGENT: I don't recognize this card payment and money is missing from my account.\nMy mobile banking login is blocked and I cannot access funds.\nThe branch advisor was helpful and resolved my mortgage question quickly.\nI have been waiting for a refund for two weeks and the support response is slow.\nThe new app is clear and transfers are fast. Thank you for the excellent service.\nI suspect fraud on my debit card — please freeze it immediately.`;
+
+const starterComplaints: Complaint[] = [
+  { id: 1, text: "URGENT: I don't recognize this card payment and money is missing from my account.", department: "Cards", sentiment: "neutral", score: 0, urgency: "critical", confidence: 66, signal: "urgent" },
+  { id: 2, text: "My mobile banking login is blocked and I cannot access funds.", department: "Digital Banking", sentiment: "negative", score: -0.14, urgency: "critical", confidence: 79, signal: "cannot access" },
+  { id: 3, text: "The branch advisor was helpful and resolved my mortgage question quickly.", department: "Lending", sentiment: "positive", score: 0.29, urgency: "standard", confidence: 82 },
+  { id: 4, text: "I have been waiting for a refund for two weeks and the support response is slow.", department: "Branch & Service", sentiment: "negative", score: -0.24, urgency: "standard", confidence: 83 },
+  { id: 5, text: "The new app is clear and transfers are fast. Thank you for the excellent service.", department: "Digital Banking", sentiment: "positive", score: 0.5, urgency: "standard", confidence: 96 },
+  { id: 6, text: "I suspect fraud on my debit card — please freeze it immediately.", department: "Fraud & Security", sentiment: "negative", score: -0.14, urgency: "critical", confidence: 79, signal: "fraud" },
+];
+
+const departmentMeta: Record<string, { icon: string; color: string }> = { Cards: { icon: "💳", color: "#e6b42f" }, "Digital Banking": { icon: "📱", color: "#44b9aa" }, Lending: { icon: "🏠", color: "#9a82e6" }, "Branch & Service": { icon: "🏢", color: "#d8845a" }, "Fraud & Security": { icon: "🛡️", color: "#df6468" } };
+
+function classify(text: string, id: number): Complaint {
+  const lower = text.toLowerCase();
+  const criticalWords = ["urgent", "fraud", "freeze", "money is missing", "cannot access", "blocked", "stolen", "unauthorized"];
+  const positiveWords = ["helpful", "quickly", "clear", "fast", "excellent", "thank you", "great", "resolved"];
+  const negativeWords = ["slow", "waiting", "blocked", "missing", "problem", "can't", "cannot", "charged", "failed"];
+  const critical = criticalWords.some(w => lower.includes(w));
+  const positive = positiveWords.some(w => lower.includes(w));
+  const negative = negativeWords.some(w => lower.includes(w));
+  const sentiment = positive && !negative ? "positive" : negative ? "negative" : "neutral";
+  const score = sentiment === "positive" ? Math.min(.5, .18 + text.length / 280) : sentiment === "negative" ? -Math.min(.45, .12 + text.length / 350) : 0;
+  const department = lower.includes("fraud") || lower.includes("debit") ? "Fraud & Security" : lower.includes("card") || lower.includes("payment") ? "Cards" : lower.includes("app") || lower.includes("login") || lower.includes("transfer") ? "Digital Banking" : lower.includes("mortgage") || lower.includes("loan") ? "Lending" : lower.includes("refund") || lower.includes("support") || lower.includes("branch") ? "Branch & Service" : "Cards";
+  const signal = critical ? criticalWords.find(w => lower.includes(w)) : undefined;
+  return { id, text, department, sentiment, score: Number(score.toFixed(2)), urgency: critical ? "critical" : "standard", confidence: Math.min(98, 64 + text.length % 35), signal };
 }
+
+export default function Home() {
+  const [complaints, setComplaints] = useState<Complaint[]>(starterComplaints);
+  const [draft, setDraft] = useState("");
+  const [bulk, setBulk] = useState(bankSample);
+  const [route, setRoute] = useState("Auto-detect");
+  const [query, setQuery] = useState("");
+  const [department, setDepartment] = useState("All departments");
+  const [alertsOnly, setAlertsOnly] = useState(false);
+  const [insight, setInsight] = useState("");
+  const [activeTab, setActiveTab] = useState("Monitor");
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  const filtered = useMemo(() => complaints.filter(c => (department === "All departments" || c.department === department) && (!alertsOnly || c.urgency === "critical") && c.text.toLowerCase().includes(query.toLowerCase())), [complaints, department, alertsOnly, query]);
+  const criticalCount = complaints.filter(c => c.urgency === "critical").length;
+  const avg = complaints.length ? (complaints.reduce((a, c) => a + c.score, 0) / complaints.length).toFixed(2) : "0.00";
+
+  const addFeedback = () => { if (!draft.trim()) return; setComplaints(prev => [classify(draft.trim(), Date.now()), ...prev]); setDraft(""); setActiveTab("Dashboard"); };
+  const analyzeBulk = () => { const rows = bulk.split(/\n+/).map(s => s.trim()).filter(Boolean).map((text, i) => classify(text, Date.now() + i)); setComplaints(rows); setActiveTab("Dashboard"); };
+  const generateInsight = () => { const hotspot = complaints.filter(c => c.urgency === "critical").sort((a,b) => b.confidence-a.confidence)[0]; const topDept = Object.entries(complaints.reduce<Record<string, number>>((acc, c) => { acc[c.department] = (acc[c.department] || 0) + (c.urgency === "critical" ? 2 : 1); return acc; }, {})).sort((a,b) => b[1]-a[1])[0]?.[0] || "Cards"; setInsight(`Executive readout: ${criticalCount} of ${complaints.length} cases require immediate review. ${topDept} is the current friction hotspot, with risk concentrated around ${hotspot?.signal || "service disruption"}. Route critical cases to the owning team, confirm customer access is restored, and review the recurring language within 24 hours.`); };
+  const exportReport = () => { const blob = new Blob([JSON.stringify({ generatedAt: new Date().toISOString(), complaints, avgSentiment: avg }, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "sentiment-360-report.json"; a.click(); URL.revokeObjectURL(url); };
+
+  return <div className="app-shell">
+    <header className="topbar"><div className="brand"><div className="brand-mark"><Fingerprint size={18}/></div><div><div className="eyebrow">ENTERPRISE INTELLIGENCE</div><strong>Sentiment <span>360</span></strong></div></div><button className="mobile-menu" onClick={() => setMobileOpen(v => !v)}><Menu size={20}/></button><button className="login-btn"><LockKeyhole size={14}/> Enterprise login</button></header>
+    <main className="container">
+      <section className="hero"><div className="hero-copy"><div className="pill"><span className="dot"/> Bank complaints operations</div><h1>From complaint<br/>noise to <em>actionable</em><br/><em>signal.</em></h1><p>Monitor customer sentiment, surface urgent risk language, and give every department a clearer 360° view of customer friction.</p><nav className={`tabs ${mobileOpen ? "open" : ""}`}>{["Monitor", "Dashboard", "Alert center", "Enterprise playbook"].map((tab, i) => <button key={tab} className={activeTab === tab ? "active" : ""} onClick={() => {setActiveTab(tab); setMobileOpen(false)}}>{i === 1 ? "📊 " : i === 2 ? "🚨 " : ""}{tab}</button>)}</nav></div><div className="control-card"><div className="control-header"><span>Control room status</span><b><i/> Live monitor</b></div><div className="control-stats"><div><span>🚨</span><strong>{criticalCount}</strong><small>Alerts</small></div><div><span>📊</span><strong>{complaints.length}</strong><small>Complaints</small></div><div><span>🛡️</span><strong>24/7</strong><small>Review-ready</small></div></div></div></section>
+      <section className="metric-grid"><Metric label="Complaints monitored" value={complaints.length} note="Current upload"/><Metric label="Urgent alerts" value={criticalCount} note="High-priority review"/><Metric label="Critical risk" value={criticalCount} note="Immediate attention"/><Metric label="Avg. sentiment" value={(Number(avg) >= 0 ? "+" : "") + avg} note="−1 negative · +1 positive"/></section>
+      <section className="work-grid"><Panel title="Add customer feedback" kicker="LIVE INTAKE" icon={<MessageSquarePlus size={17}/>}><p className="helper">Enter one complaint and send it straight into analysis, dashboard stats, and alert queues.</p><textarea value={draft} onChange={e => setDraft(e.target.value)} placeholder="Example: I was charged twice and need this resolved today."/><div className="field-row"><select value={route} onChange={e => setRoute(e.target.value)}><option>Auto-detect</option><option>Fraud & Security</option><option>Cards</option><option>Digital Banking</option><option>Payments</option><option>Lending</option><option>Branch & Service</option></select><button className="primary" onClick={addFeedback}><Plus size={16}/> Add & analyze</button></div></Panel><Panel title="Load bank complaints" kicker="BULK ANALYSIS" icon={<Upload size={17}/>}><p className="helper">Paste one complaint per line or upload a CSV with a complaint-text column.</p><textarea className="bulk" value={bulk} onChange={e => setBulk(e.target.value)}/><div className="field-row"><button className="ghost" onClick={() => setBulk(bankSample)}><Sparkles size={15}/> Use bank sample</button><button className="primary" onClick={analyzeBulk}><Search size={15}/> Analyze complaints</button></div><button className="upload-link"><Upload size={14}/> Upload bank complaints CSV</button></Panel></section>
+      {insight && <section className="insight"><div className="insight-icon"><Lightbulb size={19}/></div><div><strong>Executive insight generated</strong><p>{insight}</p></div><button onClick={() => setInsight("")}><X size={16}/></button></section>}
+      <section className="section-block"><div className="section-heading"><div><span className="kicker">DISTRIBUTION</span><h2>Sentiment by department</h2><p>Where customer friction is concentrating right now.</p></div><div className="legend"><span><i className="legend-dot neg"/> negative</span><span><i className="legend-dot alert"/> alert</span></div></div><div className="dept-grid">{Object.entries(departmentMeta).map(([name, meta]) => { const rows = complaints.filter(c => c.department === name); const neg = rows.filter(c => c.sentiment === "negative").length; const alerts = rows.filter(c => c.urgency === "critical").length; return <div className="dept-card" key={name}><div className="dept-top"><span style={{background: meta.color}}>{meta.icon}</span><small>{name}</small></div><div className="bar"><i style={{width: `${Math.max(14, rows.length / Math.max(complaints.length, 1) * 100)}%`, background: meta.color}}/></div><div className="dept-bottom"><b>{neg} neg</b><span>{alerts > 0 ? <><AlertTriangle size={13}/> {alerts}</> : "0"} alert</span></div></div>})}</div></section>
+      <section className="section-block"><div className="section-heading row"><div><span className="kicker">TRIAGE QUEUE</span><h2>Complaint intelligence</h2><p>Search, filter, and triage individual cases.</p></div><div className="actions"><button className="ghost" onClick={generateInsight}><Lightbulb size={15}/> Generate executive insight</button><button className="ghost" onClick={exportReport}><Download size={15}/> Export report</button></div></div><div className="filters"><div className="search"><Search size={15}/><input placeholder="Search complaints" value={query} onChange={e => setQuery(e.target.value)}/></div><select value={department} onChange={e => setDepartment(e.target.value)}><option>All departments</option>{Object.keys(departmentMeta).map(d => <option key={d}>{d}</option>)}</select><button className={alertsOnly ? "alert-filter active" : "alert-filter"} onClick={() => setAlertsOnly(v => !v)}><AlertTriangle size={14}/> Alerts only</button></div><div className="table-wrap"><table><thead><tr><th>Complaint</th><th>Department</th><th>Sentiment</th><th>Urgency</th><th>Confidence</th></tr></thead><tbody>{filtered.map(c => <tr key={c.id}><td><span className="sentiment-icon">{c.urgency === "critical" ? "🚨" : c.sentiment === "positive" ? "😊" : c.sentiment === "negative" ? "😟" : "◉"}</span>{c.text}</td><td><span className="dept-tag">{departmentMeta[c.department]?.icon} {c.department}</span></td><td><span className={`sentiment ${c.sentiment}`}>{c.sentiment} ({c.score >= 0 ? "+" : ""}{c.score.toFixed(2)})</span></td><td><span className={`urgency ${c.urgency}`}>{c.urgency === "critical" ? "🚨 critical" : "• standard"}</span>{c.signal && <small>Escalation signal: {c.signal}</small>}</td><td><b>{c.confidence}%</b></td></tr>)}</tbody></table>{filtered.length === 0 && <div className="empty"><CircleHelp size={22}/> No complaints match these filters.</div>}</div></section>
+      <section className="section-block feed"><div className="section-heading"><div><span className="kicker">RECENT SIGNALS</span><h2>Customer feedback feed</h2><p>Representative feedback from the current analysis, made easy to scan and discuss.</p></div></div><div className="feed-grid">{filtered.slice(0, 6).map(c => <article className="feed-card" key={c.id}><div className="feed-meta"><span>{c.urgency === "critical" ? "🚨" : c.sentiment === "positive" ? "😊" : "😟"} {departmentMeta[c.department]?.icon} {c.department}</span><small>{c.confidence}% confidence</small></div><blockquote>“{c.text}”</blockquote><div className="feed-foot"><span className={`sentiment ${c.sentiment}`}>{c.sentiment} · {c.score >= 0 ? "+" : ""}{c.score.toFixed(2)}</span><span className={c.urgency === "critical" ? "critical-text" : "standard-text"}>{c.urgency === "critical" ? "🚨 Critical" : "✅ Standard"}</span></div></article>)}</div></section>
+    </main><footer><span>Sentiment 360 · Bank customer complaints monitor</span><span>Built for explainable triage, not automated case decisions.</span></footer>
+  </div>
+}
+function Metric({label, value, note}: {label: string; value: string | number; note: string}) { return <div className="metric"><span>{label}</span><strong>{value}</strong><small>{note}</small></div> }
+function Panel({title, kicker, icon, children}: {title:string; kicker:string; icon:React.ReactNode; children:React.ReactNode}) { return <div className="panel"><div className="panel-title"><div className="panel-icon">{icon}</div><div><span className="kicker">{kicker}</span><h3>{title}</h3></div></div>{children}</div> }
